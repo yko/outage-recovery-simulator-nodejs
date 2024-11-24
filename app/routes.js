@@ -25,4 +25,18 @@ router.get('/user/:userid', (req, res) => {
   });
 });
 
+router.post('/user/', (req, res) => {
+  const db = new sqlite3.Database(req.app.get('config').DATABASE);
+  const data = req.body;
+
+  db.run("INSERT INTO users (name, email) VALUES (?, ?)", [data.name, data.email], function(err) {
+    db.close();
+    if (err) {
+      return res.status(500).json({ error: 'Database error' });
+    }
+
+    res.status(201).json({ message: 'User created', id: this.lastID });
+  });
+});
+
 module.exports = router;
