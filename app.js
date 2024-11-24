@@ -3,13 +3,14 @@ const yaml = require('js-yaml');
 const fs = require('node:fs');
 const winston = require('winston');
 const { format, transports } = require('winston');
-const { combine, timestamp, label, printf } = format;
+const { combine, timestamp, printf } = format;
+
 // Create an Express app instance
 const app = express();
 const routes = require('./app/routes');
 
 // Custom Winston log format
-const myFormat = printf(({ level, message, timestamp }) => {
+const winstonLogFormat = printf(({ level, message, timestamp }) => {
   return `${timestamp} - ${level} - ${message}`;
 });
 
@@ -17,7 +18,7 @@ const myFormat = printf(({ level, message, timestamp }) => {
 const logger = winston.createLogger({
   format: combine(
     timestamp({ format: 'YYYY-MM-DDTHH:mm:ssZ' }),
-    myFormat
+    winstonLogFormat
   ),
   transports: [
     new transports.File({ filename: 'app.log', level: 'info' }), // Log info and above to app.log
@@ -26,18 +27,18 @@ const logger = winston.createLogger({
 });
 
 // Load YAML configuration file
-const config = yaml.load(fs.readFileSync('config.yaml', 'utf8'));
-app.set('config', config);
+const appConfig = yaml.load(fs.readFileSync('config.yaml', 'utf8'));
+app.set('config', appConfig);
 
 
-// Middleware to log requests and responses.  This will log to winston
-// based on the response code.
-app.use((req, res, next) => {
-  req.log_error = '';
-  //Event listener that runs when the response is finished
-  res.on('finish', () => {
-    const message = `${req.method} ${req.path} ${res.statusCode} - ${req.log_error}`;
-    res.statusCode < 499 ? logger.info(message) : logger.error(message);
+// Middleware to log requests and responses
+app.use((request, response, next) => {
+  request.logError = '';
+
+  // Event listener that runs when the response is finished
+  response.on('finish', () => {
+    const logMessage = `${request.method} ${request.path} ${response.statusCode} - ${request.logError}`;
+    response.statusCode < 499 ? logger.info(logMessage) : logger.error(logMessage);
   });
   next(); // Proceed to the next middleware
 });
@@ -49,21 +50,21 @@ app.use(express.json());
 app.use('/', routes);
 
 // Error handling middleware
-app.use((err, req, res, next) => {
-  const lines = err.stack.split('\n');
+app.use((error, request, response, next) => {
+  const errorStackLines = error.stack.split('\n');
 
   // Filter stack trace to remove node_modules lines for better readability
-  const filteredStack = lines.filter(line => !line.includes('node_modules')).join("\n");
+  const filteredErrorStack = errorStackLines.filter(line => !line.includes('node_modules')).join("\n");
 
-  req.log_error = filteredStack;
+  request.logError = filteredErrorStack;
 
   // Check if headers have already been sent; if so, it's too late to send a custom response
-  if (res.headersSent) {
-    return next(err); // Re-throw the error to let the server handle it (e.g., crash reporting)
+  if (response.headersSent) {
+    return next(error); // Re-throw the error to let the server handle it (e.g., crash reporting)
   }
 
   // Send a generic 500 error response
-  res.status(500).json({ error: 'An internal server error occurred' });
+  response.status(500).json({ error: 'An internal server error occurred' });
 });
 
 // Export the Express app for use in other modules
